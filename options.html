@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <h1>Fine Print Settings</h1>
+
+    <div class="field">
+      <label>Provider</label>
+      <div class="provider-toggle">
+        <button type="button" class="provider-btn active" data-provider="anthropic">Anthropic (Claude)</button>
+        <button type="button" class="provider-btn" data-provider="openai">OpenAI-Compatible</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="apiKey">API Key</label>
+      <p class="help-text" id="apiKeyHelp">
+        Enter your Claude API key.
+        <a href="https://console.anthropic.com/" target="_blank" id="apiKeyLink">Get one here</a>
+      </p>
+      <div class="input-row">
+        <input type="password" id="apiKey" placeholder="sk-ant-..." spellcheck="false" />
+        <button id="toggleVisibility" type="button">Show</button>
+      </div>
+    </div>
+
+    <div class="field" id="baseUrlField" style="display: none;">
+      <label for="baseUrl">Base URL</label>
+      <p class="help-text">
+        API base URL. Change this for Groq, Together, Mistral, Ollama, etc.
+      </p>
+      <input type="text" id="baseUrl" placeholder="https://api.openai.com" spellcheck="false" />
+    </div>
+
+    <div class="field">
+      <label for="model">Model</label>
+      <p class="help-text" id="modelHelp">Model name to use for analysis.</p>
+      <input type="text" id="model" placeholder="claude-haiku-4-5-20251001" spellcheck="false" />
+    </div>
+
+    <div class="actions">
+      <button id="save">Save</button>
+      <span id="status"></span>
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
