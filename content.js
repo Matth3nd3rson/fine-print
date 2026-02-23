@@ -119,6 +119,27 @@
     return false;
   }
 
+  // --- Signup CTA Detection (gates broader legal link scanning) ---
+
+  function pageHasSignupCTA() {
+    const ctaKeywords = [
+      'sign up', 'signup', 'subscribe', 'get started', 'create account',
+      'register', 'join now', 'start trial', 'free trial', 'start now',
+      'try free', 'try for free', 'get access', 'start your',
+    ];
+
+    const clickables = document.querySelectorAll(
+      'button, a[href], [role="button"], input[type="submit"]'
+    );
+    for (const el of clickables) {
+      const text = (el.textContent || el.value || '').toLowerCase().trim();
+      if (text.length > 50) continue;
+      if (ctaKeywords.some(kw => text.includes(kw))) return true;
+    }
+
+    return false;
+  }
+
   // --- Consent Link Detection ---
 
   function checkConsentLinks() {
@@ -150,21 +171,22 @@
       }
     }
 
-    // Part 2: Scan all links on the page for legal documents
+    // Part 2: On signup/subscribe pages, also scan all links for legal documents
     // Catches footer links, nav links, etc. that aren't wrapped in consent text
-    // seenUrls prevents duplicates with Part 1
-    for (const a of document.querySelectorAll('a[href]')) {
-      const href = a.href;
-      const linkText = a.textContent.trim();
-      if (!href || !linkText || linkText.length > 100 || linkText.length < 3) continue;
-      if (!href.startsWith('http') || seenUrls.has(href)) continue;
+    if (foundLinks.length === 0 && pageHasSignupCTA()) {
+      for (const a of document.querySelectorAll('a[href]')) {
+        const href = a.href;
+        const linkText = a.textContent.trim();
+        if (!href || !linkText || linkText.length > 100 || linkText.length < 3) continue;
+        if (!href.startsWith('http') || seenUrls.has(href)) continue;
 
-      const combined = (linkText + ' ' + href).toLowerCase();
-      const isLegal = LEGAL_LINK_KEYWORDS.some(kw => combined.includes(kw));
-      if (!isLegal) continue;
+        const combined = (linkText + ' ' + href).toLowerCase();
+        const isLegal = LEGAL_LINK_KEYWORDS.some(kw => combined.includes(kw));
+        if (!isLegal) continue;
 
-      seenUrls.add(href);
-      foundLinks.push({ url: href, text: linkText });
+        seenUrls.add(href);
+        foundLinks.push({ url: href, text: linkText });
+      }
     }
 
     return foundLinks;
@@ -327,6 +349,46 @@
       }
     }, OBSERVER_TIMEOUT);
   }
+
+  // --- Full Page Legal Link Scan (manual scan only, no CTA gate) ---
+
+  function scanAllLegalLinks() {
+    if (hasSentDetection) return;
+
+    // First try normal detection
+    tryDetect();
+    if (hasSentDetection) return;
+
+    // If nothing found, do an ungated scan of ALL links on the page
+    const foundLinks = [];
+    const seenUrls = new Set();
+
+    for (const a of document.querySelectorAll('a[href]')) {
+      const href = a.href;
+      const linkText = a.textContent.trim();
+      if (!href || !linkText || linkText.length > 100 || linkText.length < 3) continue;
+      if (!href.startsWith('http') || seenUrls.has(href)) continue;
+
+      const combined = (linkText + ' ' + href).toLowerCase();
+      const isLegal = LEGAL_LINK_KEYWORDS.some(kw => combined.includes(kw));
+      if (!isLegal) continue;
+
+      seenUrls.add(href);
+      foundLinks.push({ url: href, text: linkText });
+    }
+
+    if (foundLinks.length > 0) {
+      sendConsentLinks(foundLinks);
+    }
+  }
+
+  // Listen for manual scan request from background
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'SCAN_ALL') {
+      hasSentDetection = false;
+      scanAllLegalLinks();
+    }
+  });
 
   // --- Main ---
 

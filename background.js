@@ -463,11 +463,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     analyzeURL(message.tabId, message.url, message.linkIndex);
   }
 
-  // Popup: manual re-scan
+  // Popup: manual re-scan (re-injects content script, then sends SCAN_ALL flag)
   if (message.type === 'MANUAL_SCAN') {
     chrome.scripting.executeScript({
       target: { tabId: message.tabId },
       files: ['content.js'],
+    }).then(() => {
+      chrome.tabs.sendMessage(message.tabId, { type: 'SCAN_ALL' });
     });
   }
 
