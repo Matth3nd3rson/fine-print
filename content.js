@@ -45,7 +45,8 @@
   // Link text/URL keywords for filtering consent links
   const LEGAL_LINK_KEYWORDS = [
     'terms', 'privacy', 'policy', 'eula', 'legal', 'conditions',
-    'agreement', 'cookie', 'tos', 'data processing',
+    'agreement', 'cookie', 'tos', 'data processing', 'subscriber',
+    'acceptable use',
   ];
 
   const MAX_TEXT_LENGTH = 50000;
@@ -118,6 +119,27 @@
     return false;
   }
 
+  // --- Signup CTA Detection (used to gate broader legal link scanning) ---
+
+  function pageHasSignupCTA() {
+    const ctaKeywords = [
+      'sign up', 'signup', 'subscribe', 'get started', 'create account',
+      'register', 'join now', 'start trial', 'free trial', 'start now',
+      'try free', 'try for free', 'get access', 'start your',
+    ];
+
+    const clickables = document.querySelectorAll(
+      'button, a[href], [role="button"], input[type="submit"]'
+    );
+    for (const el of clickables) {
+      const text = (el.textContent || el.value || '').toLowerCase().trim();
+      if (text.length > 50) continue;
+      if (ctaKeywords.some(kw => text.includes(kw))) return true;
+    }
+
+    return false;
+  }
+
   // --- Consent Link Detection ---
 
   function checkConsentLinks() {
@@ -140,6 +162,24 @@
         if (!href || !linkText || seenUrls.has(href)) continue;
 
         // Check if the link points to a legal document
+        const combined = (linkText + ' ' + href).toLowerCase();
+        const isLegal = LEGAL_LINK_KEYWORDS.some(kw => combined.includes(kw));
+        if (!isLegal) continue;
+
+        seenUrls.add(href);
+        foundLinks.push({ url: href, text: linkText });
+      }
+    }
+
+    // Part 2: If no consent text links found, scan the entire page for legal links
+    // Only triggers on pages with signup/subscribe CTAs to avoid being spammy
+    if (foundLinks.length === 0 && pageHasSignupCTA()) {
+      for (const a of document.querySelectorAll('a[href]')) {
+        const href = a.href;
+        const linkText = a.textContent.trim();
+        if (!href || !linkText || linkText.length > 100 || linkText.length < 3) continue;
+        if (!href.startsWith('http') || seenUrls.has(href)) continue;
+
         const combined = (linkText + ' ' + href).toLowerCase();
         const isLegal = LEGAL_LINK_KEYWORDS.some(kw => combined.includes(kw));
         if (!isLegal) continue;

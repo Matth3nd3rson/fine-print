@@ -189,6 +189,47 @@ function htmlToText(html) {
   return text;
 }
 
+// --- Extract legal links from HTML (for directory/hub pages) ---
+
+function extractLegalLinks(html, baseUrl) {
+  const linkRegex = /<a\s[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const links = [];
+  const seen = new Set();
+  let match;
+
+  const legalKeywords = [
+    'privacy', 'terms', 'policy', 'legal', 'agreement', 'cookie',
+    'notice', 'rights', 'consent', 'gdpr', 'ccpa', 'data protection',
+    'eula', 'acceptable use', 'conditions', 'subscriber',
+  ];
+
+  while ((match = linkRegex.exec(html)) !== null) {
+    let href = match[1];
+    const text = match[2].replace(/<[^>]+>/g, '').trim();
+
+    if (!text || text.length > 120 || text.length < 3) continue;
+
+    // Resolve relative URLs
+    try {
+      href = new URL(href, baseUrl).href;
+    } catch { continue; }
+
+    // Skip same-page anchors, javascript:, mailto:, etc.
+    if (!href.startsWith('http')) continue;
+    if (seen.has(href)) continue;
+    // Skip if it's the same page we already fetched
+    if (href === baseUrl || href === baseUrl + '/') continue;
+    seen.add(href);
+
+    const combined = (text + ' ' + href).toLowerCase();
+    if (legalKeywords.some(kw => combined.includes(kw))) {
+      links.push({ url: href, text });
+    }
+  }
+
+  return links;
+}
+
 // --- LLM Analysis (shared by direct page and URL fetch) ---
 
 async function callLLM(settings, text) {
@@ -325,10 +366,19 @@ async function analyzeURL(tabId, url, linkIndex) {
     const analysis = parseAnalysis(rawText);
 
     if (analysis.error === 'not_legal_document') {
-      linkResults[linkIndex] = {
-        status: 'error',
-        error: 'This does not appear to be a legal agreement.',
-      };
+      // This might be a directory/hub page — extract legal links from it
+      const subLinks = extractLegalLinks(html, url);
+      if (subLinks.length > 0) {
+        linkResults[linkIndex] = {
+          status: 'has_sublinks',
+          subLinks,
+        };
+      } else {
+        linkResults[linkIndex] = {
+          status: 'error',
+          error: 'This does not appear to be a legal agreement.',
+        };
+      }
       await chrome.storage.session.set({
         [stateKey]: { ...state, linkResults },
       });

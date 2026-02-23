@@ -108,8 +108,9 @@ function renderConsentLinks(state) {
       html += `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
     } else if (result.status === 'error') {
       html += `<div class="consent-link-error">${escapeHtml(result.error)}</div>`;
+    } else if (result.status === 'has_sublinks') {
+      html += `<div class="consent-link-result"><span class="sublink-badge">hub page</span></div>`;
     } else if (result.status === 'complete') {
-      // Show inline summary
       const analysis = result.analysis;
       const highCount = result.highCount || 0;
       html += `
@@ -122,6 +123,53 @@ function renderConsentLinks(state) {
 
     html += `</div>`;
 
+    // Sub-links: show drillable links from directory/hub pages
+    if (result && result.status === 'has_sublinks' && result.subLinks?.length > 0) {
+      html += `<div class="sublinks-container">`;
+      html += `<div class="sublinks-label">This page links to multiple documents:</div>`;
+      for (let j = 0; j < result.subLinks.length; j++) {
+        const sub = result.subLinks[j];
+        const subKey = `${i}_sub_${j}`;
+        const subResult = results[subKey];
+        const subDomain = getDomain(sub.url);
+
+        html += `<div class="consent-link-card sublink-card" data-key="${subKey}">`;
+        html += `
+          <div class="consent-link-info">
+            <div class="consent-link-name">${escapeHtml(sub.text)}</div>
+            <div class="consent-link-url">${escapeHtml(subDomain)}</div>
+          </div>
+        `;
+
+        if (!subResult) {
+          html += `<button class="consent-analyze-btn sublink-analyze-btn" data-key="${subKey}" data-url="${escapeHtml(sub.url)}">Analyze</button>`;
+        } else if (subResult.status === 'analyzing') {
+          html += `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+        } else if (subResult.status === 'error') {
+          html += `<div class="consent-link-error">${escapeHtml(subResult.error)}</div>`;
+        } else if (subResult.status === 'has_sublinks') {
+          html += `<div class="consent-link-error">Another hub page — try opening directly.</div>`;
+        } else if (subResult.status === 'complete') {
+          const subAnalysis = subResult.analysis;
+          const subHighCount = subResult.highCount || 0;
+          html += `
+            <div class="consent-link-result">
+              <span class="risk-badge ${subAnalysis.overallRisk}">${subAnalysis.overallRisk} risk</span>
+              ${subHighCount > 0 ? `<span class="consent-finding-count">${subHighCount} red flag${subHighCount > 1 ? 's' : ''}</span>` : ''}
+            </div>
+          `;
+        }
+
+        html += `</div>`;
+
+        // Show findings for completed sub-links
+        if (subResult && subResult.status === 'complete' && subResult.analysis.findings?.length > 0) {
+          html += renderConsentFindings(subResult.analysis, subKey);
+        }
+      }
+      html += `</div>`;
+    }
+
     // If this link has complete results, show expandable findings below the card
     if (result && result.status === 'complete' && result.analysis.findings?.length > 0) {
       html += renderConsentFindings(result.analysis, i);
@@ -131,8 +179,8 @@ function renderConsentLinks(state) {
   html += `</div></div>`;
   content.innerHTML = html;
 
-  // Attach analyze button handlers
-  content.querySelectorAll('.consent-analyze-btn').forEach(btn => {
+  // Attach analyze button handlers (top-level consent links)
+  content.querySelectorAll('.consent-analyze-btn:not(.sublink-analyze-btn)').forEach(btn => {
     btn.addEventListener('click', () => {
       const index = parseInt(btn.dataset.index);
       chrome.runtime.sendMessage({
@@ -141,7 +189,21 @@ function renderConsentLinks(state) {
         url: links[index].url,
         linkIndex: index,
       });
-      // Replace button with spinner immediately
+      btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+    });
+  });
+
+  // Attach analyze button handlers (sub-links from hub pages)
+  content.querySelectorAll('.sublink-analyze-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      const url = btn.dataset.url;
+      chrome.runtime.sendMessage({
+        type: 'ANALYZE_URL',
+        tabId: currentTabId,
+        url: url,
+        linkIndex: key,
+      });
       btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
     });
   });
