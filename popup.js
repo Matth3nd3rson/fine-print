@@ -17,6 +17,7 @@ const THINKING_VERBS = [
   'Grokking',
   'Unearthing',
   'Unwrapping',
+  'Having a peek',
 ];
 
 function shuffle(arr) {
