@@ -155,6 +155,10 @@ header h1 {
   to { transform: rotate(360deg); }
 }
 
+.thinking-text {
+  transition: opacity 0.2s;
+}
+
 /* --- Error State --- */
 
 .state-error {

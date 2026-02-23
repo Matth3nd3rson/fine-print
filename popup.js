@@ -1,5 +1,35 @@
 const content = document.getElementById('content');
 let currentTabId = null;
+let thinkingInterval = null;
+
+const THINKING_VERBS = [
+  'Analyzing',
+  'Crunching',
+  'Demystifying',
+  'Unraveling',
+  'Dejargoning',
+  'Decorporatifying',
+  'Decoding',
+  'Translating',
+  'Scrutinizing',
+  'Dissecting',
+];
+
+function startThinkingVerbs(el) {
+  if (thinkingInterval) clearInterval(thinkingInterval);
+  let index = 0;
+  thinkingInterval = setInterval(() => {
+    index = (index + 1) % THINKING_VERBS.length;
+    if (el) el.textContent = `${THINKING_VERBS[index]}...`;
+  }, 2000);
+}
+
+function stopThinkingVerbs() {
+  if (thinkingInterval) {
+    clearInterval(thinkingInterval);
+    thinkingInterval = null;
+  }
+}
 
 // --- Rendering ---
 
@@ -16,9 +46,10 @@ function renderEmpty() {
     content.innerHTML = `
       <div class="state-analyzing">
         <div class="spinner"></div>
-        <p>Scanning page...</p>
+        <p class="thinking-text">Scanning...</p>
       </div>
     `;
+    startThinkingVerbs(content.querySelector('.thinking-text'));
   });
 }
 
@@ -41,9 +72,10 @@ function renderAnalyzing() {
   content.innerHTML = `
     <div class="state-analyzing">
       <div class="spinner"></div>
-      <p>Analyzing agreement...</p>
+      <p class="thinking-text">Analyzing...</p>
     </div>
   `;
+  startThinkingVerbs(content.querySelector('.thinking-text'));
 }
 
 function renderError(state) {
@@ -317,6 +349,7 @@ function getDomain(url) {
 // --- State Management ---
 
 function renderState(state) {
+  stopThinkingVerbs();
   if (!state) {
     renderEmpty();
     return;
