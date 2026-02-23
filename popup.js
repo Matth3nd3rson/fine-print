@@ -13,19 +13,33 @@ const THINKING_VERBS = [
   'Translating',
   'Scrutinizing',
   'Dissecting',
+  'Sniffing around',
+  'Grokking',
+  'Unearthing',
+  'Unwrapping',
 ];
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 function startThinkingVerbs() {
   if (thinkingInterval) clearInterval(thinkingInterval);
-  let index = Math.floor(Math.random() * THINKING_VERBS.length);
-  // Set initial random verb immediately
+  const verbs = shuffle(THINKING_VERBS);
+  let index = 0;
+  // Set first random verb immediately
   document.querySelectorAll('.thinking-text').forEach(el => {
-    el.textContent = `${THINKING_VERBS[index]}...`;
+    el.textContent = `${verbs[index]}...`;
   });
   thinkingInterval = setInterval(() => {
-    index = (index + 1) % THINKING_VERBS.length;
+    index = (index + 1) % verbs.length;
     document.querySelectorAll('.thinking-text').forEach(el => {
-      el.textContent = `${THINKING_VERBS[index]}...`;
+      el.textContent = `${verbs[index]}...`;
     });
   }, 2000);
 }
