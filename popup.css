@@ -482,8 +482,16 @@ header h1 {
 }
 
 .consent-link-spinner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   padding: 4px 10px;
+}
+
+.consent-link-spinner .thinking-text {
+  font-size: 11px;
+  color: #666;
 }
 
 .spinner-sm {

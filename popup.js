@@ -15,12 +15,18 @@ const THINKING_VERBS = [
   'Dissecting',
 ];
 
-function startThinkingVerbs(el) {
+function startThinkingVerbs() {
   if (thinkingInterval) clearInterval(thinkingInterval);
-  let index = 0;
+  let index = Math.floor(Math.random() * THINKING_VERBS.length);
+  // Set initial random verb immediately
+  document.querySelectorAll('.thinking-text').forEach(el => {
+    el.textContent = `${THINKING_VERBS[index]}...`;
+  });
   thinkingInterval = setInterval(() => {
     index = (index + 1) % THINKING_VERBS.length;
-    if (el) el.textContent = `${THINKING_VERBS[index]}...`;
+    document.querySelectorAll('.thinking-text').forEach(el => {
+      el.textContent = `${THINKING_VERBS[index]}...`;
+    });
   }, 2000);
 }
 
@@ -49,7 +55,7 @@ function renderEmpty() {
         <p class="thinking-text">Scanning...</p>
       </div>
     `;
-    startThinkingVerbs(content.querySelector('.thinking-text'));
+    startThinkingVerbs();
   });
 }
 
@@ -75,7 +81,7 @@ function renderAnalyzing() {
       <p class="thinking-text">Analyzing...</p>
     </div>
   `;
-  startThinkingVerbs(content.querySelector('.thinking-text'));
+  startThinkingVerbs();
 }
 
 function renderError(state) {
@@ -137,7 +143,7 @@ function renderConsentLinks(state) {
       // Not yet analyzed
       html += `<button class="consent-analyze-btn" data-index="${i}">Analyze</button>`;
     } else if (result.status === 'analyzing') {
-      html += `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+      html += `<div class="consent-link-spinner"><div class="spinner-sm"></div><span class="thinking-text">Analyzing...</span></div>`;
     } else if (result.status === 'error') {
       html += `<div class="consent-link-error">${escapeHtml(result.error)}</div>`;
     } else if (result.status === 'has_sublinks') {
@@ -176,7 +182,7 @@ function renderConsentLinks(state) {
         if (!subResult) {
           html += `<button class="consent-analyze-btn sublink-analyze-btn" data-key="${subKey}" data-url="${escapeHtml(sub.url)}">Analyze</button>`;
         } else if (subResult.status === 'analyzing') {
-          html += `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+          html += `<div class="consent-link-spinner"><div class="spinner-sm"></div><span class="thinking-text">Analyzing...</span></div>`;
         } else if (subResult.status === 'error') {
           html += `<div class="consent-link-error">${escapeHtml(subResult.error)}</div>`;
         } else if (subResult.status === 'has_sublinks') {
@@ -221,7 +227,8 @@ function renderConsentLinks(state) {
         url: links[index].url,
         linkIndex: index,
       });
-      btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+      btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div><span class="thinking-text">Analyzing...</span></div>`;
+      startThinkingVerbs();
     });
   });
 
@@ -236,9 +243,15 @@ function renderConsentLinks(state) {
         url: url,
         linkIndex: key,
       });
-      btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div></div>`;
+      btn.outerHTML = `<div class="consent-link-spinner"><div class="spinner-sm"></div><span class="thinking-text">Analyzing...</span></div>`;
+      startThinkingVerbs();
     });
   });
+
+  // Start thinking verbs if any links are currently analyzing
+  if (content.querySelector('.thinking-text')) {
+    startThinkingVerbs();
+  }
 
   // Attach expand/collapse handlers for findings
   content.querySelectorAll('.finding-header').forEach(header => {
