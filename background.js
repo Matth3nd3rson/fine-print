@@ -98,7 +98,7 @@ Rules:
 
 async function callAnthropic(settings, text) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(() => controller.abort(), 45000);
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -143,7 +143,7 @@ async function callOpenAICompatible(settings, text) {
   const baseUrl = (settings.baseUrl || 'https://api.openai.com').replace(/\/+$/, '');
   const endpoint = `${baseUrl}/v1/chat/completions`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(() => controller.abort(), 45000);
 
   try {
     const response = await fetch(endpoint, {
@@ -301,8 +301,13 @@ async function analyzeTOS(tabId) {
   });
   updateBadge(tabId, 'analyzing');
 
+  // Hard 60s deadline for the entire analysis flow
+  const deadline = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Analysis timed out. Please try again.')), 60000)
+  );
+
   try {
-    const rawText = await callLLM(settings, state.text);
+    const rawText = await Promise.race([callLLM(settings, state.text), deadline]);
     const analysis = parseAnalysis(rawText);
 
     if (analysis.error === 'not_legal_document') {
@@ -362,9 +367,9 @@ async function analyzeURL(tabId, url, linkIndex) {
   });
 
   try {
-    // Fetch the linked page (30s timeout)
+    // Fetch the linked page (15s timeout)
     const fetchController = new AbortController();
-    const fetchTimeout = setTimeout(() => fetchController.abort(), 30000);
+    const fetchTimeout = setTimeout(() => fetchController.abort(), 15000);
     let html;
     try {
       const response = await fetch(url, { signal: fetchController.signal });
@@ -580,7 +585,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // Auto-clear stuck analyzing state after 90 seconds
       if (state && state.status === 'analyzing' && state.analyzeStartedAt
-          && Date.now() - state.analyzeStartedAt > 90000) {
+          && Date.now() - state.analyzeStartedAt > 60000) {
         const timedOut = { ...state, status: 'error', error: 'Analysis timed out. Please try again.' };
         await chrome.storage.session.set({ [stateKey]: timedOut });
         updateBadge(message.tabId, 'error');
