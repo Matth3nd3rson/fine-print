@@ -127,6 +127,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     showStatus('Saved!', 'success');
   });
 
+  // --- Test Connection ---
+
+  const testBtn = document.getElementById('testBtn');
+
+  testBtn.addEventListener('click', async () => {
+    // Save settings first so background has them
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+      showStatus('Please enter an API key first.', 'error');
+      return;
+    }
+
+    const settings = {
+      provider: currentProvider,
+      apiKey: key,
+      model: modelInput.value.trim() || PROVIDER_DEFAULTS[currentProvider].model,
+    };
+    if (currentProvider === 'openai') {
+      settings.baseUrl = baseUrlInput.value.trim() || PROVIDER_DEFAULTS[currentProvider].baseUrl;
+    } else {
+      settings.baseUrl = '';
+    }
+    await chrome.storage.local.set(settings);
+
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+
+    chrome.runtime.sendMessage({ type: 'TEST_CONNECTION' }, (response) => {
+      testBtn.disabled = false;
+      testBtn.textContent = 'Test Connection';
+
+      if (response && response.success) {
+        showStatus('Connection successful!', 'success');
+      } else {
+        showStatus(`Connection failed: ${response?.error || 'Unknown error'}`, 'error');
+      }
+    });
+  });
+
   function showStatus(text, type) {
     statusEl.textContent = text;
     statusEl.className = type;

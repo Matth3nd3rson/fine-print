@@ -97,68 +97,89 @@ Rules:
 // --- Provider-specific API calls ---
 
 async function callAnthropic(settings, text) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': settings.apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: settings.model || 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [
-        { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
 
-  if (!response.ok) {
-    let errorMsg = `API error: ${response.status}`;
-    try {
-      const errorBody = await response.json();
-      errorMsg = errorBody.error?.message || errorMsg;
-    } catch {}
-    throw new Error(errorMsg);
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': settings.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: settings.model || 'claude-haiku-4-5-20251001',
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        messages: [
+          { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMsg = `API error: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody.error?.message || errorMsg;
+      } catch {}
+      throw new Error(errorMsg);
+    }
+
+    const result = await response.json();
+    return result.content[0].text;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const result = await response.json();
-  return result.content[0].text;
 }
 
 async function callOpenAICompatible(settings, text) {
   const baseUrl = (settings.baseUrl || 'https://api.openai.com').replace(/\/+$/, '');
   const endpoint = `${baseUrl}/v1/chat/completions`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.model || 'gpt-4o-mini',
-      max_tokens: 4096,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
-      ],
-    }),
-  });
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: settings.model || 'gpt-4o-mini',
+        max_tokens: 4096,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
+        ],
+      }),
+    });
 
-  if (!response.ok) {
-    let errorMsg = `API error: ${response.status}`;
-    try {
-      const errorBody = await response.json();
-      errorMsg = errorBody.error?.message || errorMsg;
-    } catch {}
-    throw new Error(errorMsg);
+    if (!response.ok) {
+      let errorMsg = `API error: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody.error?.message || errorMsg;
+      } catch {}
+      throw new Error(errorMsg);
+    }
+
+    const result = await response.json();
+    return result.choices[0].message.content;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const result = await response.json();
-  return result.choices[0].message.content;
 }
 
 // --- HTML to Text (for fetching linked legal pages) ---
@@ -276,7 +297,7 @@ async function analyzeTOS(tabId) {
   }
 
   await chrome.storage.session.set({
-    [stateKey]: { ...state, status: 'analyzing' },
+    [stateKey]: { ...state, status: 'analyzing', analyzeStartedAt: Date.now() },
   });
   updateBadge(tabId, 'analyzing');
 
@@ -341,13 +362,22 @@ async function analyzeURL(tabId, url, linkIndex) {
   });
 
   try {
-    // Fetch the linked page
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch (${response.status})`);
+    // Fetch the linked page (30s timeout)
+    const fetchController = new AbortController();
+    const fetchTimeout = setTimeout(() => fetchController.abort(), 30000);
+    let html;
+    try {
+      const response = await fetch(url, { signal: fetchController.signal });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch (${response.status})`);
+      }
+      html = await response.text();
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Page took too long to load.');
+      throw err;
+    } finally {
+      clearTimeout(fetchTimeout);
     }
-
-    const html = await response.text();
     const text = htmlToText(html);
 
     if (text.length < 500) {
@@ -463,6 +493,75 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     analyzeURL(message.tabId, message.url, message.linkIndex);
   }
 
+  // Options: test API connection
+  if (message.type === 'TEST_CONNECTION') {
+    (async () => {
+      try {
+        const settings = await chrome.storage.local.get(['provider', 'apiKey', 'baseUrl', 'model']);
+        if (!settings.apiKey) {
+          sendResponse({ success: false, error: 'No API key saved.' });
+          return;
+        }
+        // Minimal call to validate the key
+        const testText = 'Respond with the word OK.';
+        if (settings.provider === 'openai') {
+          const baseUrl = (settings.baseUrl || 'https://api.openai.com').replace(/\/+$/, '');
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
+          try {
+            const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
+              method: 'POST',
+              signal: controller.signal,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${settings.apiKey}`,
+              },
+              body: JSON.stringify({
+                model: settings.model || 'gpt-4o-mini',
+                max_tokens: 10,
+                messages: [{ role: 'user', content: testText }],
+              }),
+            });
+            if (!resp.ok) {
+              const body = await resp.json().catch(() => ({}));
+              throw new Error(body.error?.message || `HTTP ${resp.status}`);
+            }
+            sendResponse({ success: true });
+          } finally { clearTimeout(timeout); }
+        } else {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
+          try {
+            const resp = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              signal: controller.signal,
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': settings.apiKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true',
+              },
+              body: JSON.stringify({
+                model: settings.model || 'claude-haiku-4-5-20251001',
+                max_tokens: 10,
+                messages: [{ role: 'user', content: testText }],
+              }),
+            });
+            if (!resp.ok) {
+              const body = await resp.json().catch(() => ({}));
+              throw new Error(body.error?.message || `HTTP ${resp.status}`);
+            }
+            sendResponse({ success: true });
+          } finally { clearTimeout(timeout); }
+        }
+      } catch (err) {
+        const msg = err.name === 'AbortError' ? 'Connection timed out.' : err.message;
+        sendResponse({ success: false, error: msg });
+      }
+    })();
+    return true;
+  }
+
   // Popup: manual re-scan (re-injects content script, then sends SCAN_ALL flag)
   if (message.type === 'MANUAL_SCAN') {
     chrome.scripting.executeScript({
@@ -476,8 +575,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Popup: get current state
   if (message.type === 'GET_STATE') {
     const stateKey = `tab_${message.tabId}`;
-    chrome.storage.session.get(stateKey).then(stored => {
-      sendResponse(stored[stateKey] || null);
+    chrome.storage.session.get(stateKey).then(async (stored) => {
+      const state = stored[stateKey] || null;
+
+      // Auto-clear stuck analyzing state after 90 seconds
+      if (state && state.status === 'analyzing' && state.analyzeStartedAt
+          && Date.now() - state.analyzeStartedAt > 90000) {
+        const timedOut = { ...state, status: 'error', error: 'Analysis timed out. Please try again.' };
+        await chrome.storage.session.set({ [stateKey]: timedOut });
+        updateBadge(message.tabId, 'error');
+        sendResponse(timedOut);
+        return;
+      }
+
+      sendResponse(state);
     });
     return true;
   }
@@ -488,11 +599,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(`tab_${tabId}`);
 });
 
-// Clear state on navigation
+// Clear state on navigation and tell content script to reset
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     chrome.storage.session.remove(`tab_${tabId}`);
     chrome.action.setBadgeText({ text: '', tabId });
+    // Reset content script detection flag (handles bfcache/SPA edge cases)
+    chrome.tabs.sendMessage(tabId, { type: 'RESET_DETECTION' }).catch(() => {});
   }
 });
 

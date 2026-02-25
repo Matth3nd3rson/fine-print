@@ -1,4 +1,8 @@
 (() => {
+  // Prevent duplicate initialization on re-injection (manual scan)
+  if (window.__finePrintInjected) return;
+  window.__finePrintInjected = true;
+
   // URL patterns that indicate a ToS/privacy/legal page
   const TOS_URL_PATTERNS = [
     /[-/]terms[-_]?(of[-_]?(service|use))?/i,
@@ -150,7 +154,7 @@
     for (const el of elements) {
       const text = el.textContent || '';
       // Skip elements that are too long (not consent text) or too short
-      if (text.length > 500 || text.length < 15) continue;
+      if (text.length > 2000 || text.length < 10) continue;
 
       const matchesConsent = CONSENT_PATTERNS.some(p => p.test(text));
       if (!matchesConsent) continue;
@@ -382,11 +386,23 @@
     }
   }
 
-  // Listen for manual scan request from background
+  // Listen for messages from background
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'SCAN_ALL') {
       hasSentDetection = false;
       scanAllLegalLinks();
+    }
+    if (message.type === 'RESET_DETECTION') {
+      hasSentDetection = false;
+      lastUrl = window.location.href;
+      stopAll();
+      setTimeout(() => {
+        tryDetect();
+        if (!hasSentDetection && shouldObserve()) {
+          startObserving();
+          startUrlPolling();
+        }
+      }, 500);
     }
   });
 
