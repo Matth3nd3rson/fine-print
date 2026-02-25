@@ -53,7 +53,7 @@
     'acceptable use',
   ];
 
-  const MAX_TEXT_LENGTH = 50000;
+  const MAX_TEXT_LENGTH = 25000;
   const OBSERVER_TIMEOUT = 10000; // 10s (reduced from 30s)
   const DEBOUNCE_MS = 800;
   const URL_POLL_INTERVAL = 2000;
@@ -212,7 +212,7 @@
         const text = el.innerText.trim();
         if (text.length >= 500) {
           return text.length > MAX_TEXT_LENGTH
-            ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]'
+            ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 25,000 characters]'
             : text;
         }
       }
@@ -220,7 +220,7 @@
 
     let text = document.body.innerText.trim();
     if (text.length > MAX_TEXT_LENGTH) {
-      text = text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]';
+      text = text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 25,000 characters]';
     }
     return text;
   }

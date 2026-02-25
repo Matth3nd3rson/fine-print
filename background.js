@@ -112,7 +112,7 @@ async function callAnthropic(settings, text) {
       },
       body: JSON.stringify({
         model: settings.model || 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
+        max_tokens: 2048,
         system: SYSTEM_PROMPT,
         messages: [
           { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
@@ -155,7 +155,7 @@ async function callOpenAICompatible(settings, text) {
       },
       body: JSON.stringify({
         model: settings.model || 'gpt-4o-mini',
-        max_tokens: 4096,
+        max_tokens: 2048,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: `Analyze the following legal document:\n\n${text}` },
@@ -204,8 +204,8 @@ function htmlToText(html) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (text.length > 50000) {
-    text = text.substring(0, 50000) + '\n\n[Text truncated at 50,000 characters]';
+  if (text.length > 25000) {
+    text = text.substring(0, 25000) + '\n\n[Text truncated at 25,000 characters]';
   }
   return text;
 }
