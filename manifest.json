@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "notifications"
   ],
   "host_permissions": [
     "https://*/*",
@@ -23,6 +24,9 @@
       "run_at": "document_idle"
     }
   ],
+  "icons": {
+    "128": "icon128.png"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Fine Print"

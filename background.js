@@ -1,3 +1,37 @@
+// --- Notifications ---
+
+function notifyAnalysisComplete(tabId, analysis) {
+  const highCount = (analysis.findings || []).filter(f => f.severity === 'high').length;
+  const totalCount = (analysis.findings || []).length;
+  const title = highCount > 0
+    ? `${highCount} red flag${highCount > 1 ? 's' : ''} found`
+    : 'Analysis complete';
+  const message = highCount > 0
+    ? `Found ${totalCount} finding${totalCount > 1 ? 's' : ''} — click to review.`
+    : totalCount > 0
+      ? `${totalCount} finding${totalCount > 1 ? 's' : ''}, no red flags.`
+      : 'No notable findings in this agreement.';
+
+  chrome.notifications.create(`analysis_${tabId}`, {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title,
+    message,
+  });
+}
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  const match = notificationId.match(/^analysis_(\d+)$/);
+  if (match) {
+    const tabId = parseInt(match[1]);
+    chrome.tabs.get(tabId).then((tab) => {
+      chrome.tabs.update(tabId, { active: true });
+      chrome.windows.update(tab.windowId, { focused: true });
+    }).catch(() => {});
+  }
+  chrome.notifications.clear(notificationId);
+});
+
 // --- Badge Management ---
 
 function updateBadge(tabId, status, count) {
@@ -59,46 +93,50 @@ function generateIcons() {
   chrome.action.setIcon({ imageData });
 }
 
-// --- LLM API ---
+// --- Per-tab abort tracking ---
 
-const SYSTEM_PROMPT = `You are a consumer rights legal analyst. Your job is to analyze Terms of Service, Privacy Policies, EULAs, and similar legal agreements and identify clauses that are concerning, unusual, or disadvantageous for the user/consumer.
+const tabAbortControllers = new Map();
 
-Analyze the provided legal document and return a JSON response with this exact structure:
-
-{
-  "summary": "A 2-3 sentence plain-English summary of what this agreement covers and its overall stance toward the user.",
-  "overallRisk": "low" | "medium" | "high",
-  "findings": [
-    {
-      "severity": "high" | "medium" | "low",
-      "category": "string",
-      "title": "Short descriptive title (under 10 words)",
-      "explanation": "Plain-English explanation of what this means for the user and why it matters. 1-2 sentences.",
-      "quote": "The relevant excerpt from the document (keep under 100 words)"
-    }
-  ]
+function getTabAbort(tabId) {
+  abortTab(tabId);
+  const controller = new AbortController();
+  tabAbortControllers.set(tabId, controller);
+  return controller.signal;
 }
 
-Severity guidelines:
-- HIGH: Clauses that significantly harm user rights or are unusual/aggressive. Examples: mandatory binding arbitration, class action waivers, broad intellectual property assignment, unlimited liability for user, unilateral right to change terms without notice, perpetual irrevocable content licenses, waiver of right to jury trial.
-- MEDIUM: Clauses worth knowing about that give the company significant advantages. Examples: automatic renewal, broad data sharing with third parties, extensive data collection, right to terminate accounts without cause, right to modify services without notice, broad limitation of liability.
-- LOW: Standard clauses that are common but users should be aware of. Examples: governing law/jurisdiction, standard indemnification, standard warranty disclaimers, age requirements.
+function abortTab(tabId) {
+  const existing = tabAbortControllers.get(tabId);
+  if (existing) {
+    existing.abort();
+    tabAbortControllers.delete(tabId);
+  }
+}
 
-Categories to use: "Arbitration", "Class Action", "IP Rights", "Liability", "Data Privacy", "Data Sharing", "Account Termination", "Content License", "Price Changes", "Auto-Renewal", "Governing Law", "Indemnification", "Warranty", "Modification of Terms", "Third Party", "Other".
+// Check if the tab's state still matches the URL we started with
+async function isStale(stateKey, originalUrl) {
+  const stored = await chrome.storage.session.get(stateKey);
+  const current = stored[stateKey];
+  return !current || current.url !== originalUrl;
+}
 
-Rules:
-- Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON.
-- Order findings by severity (high first, then medium, then low).
-- Include the most relevant direct quote for each finding.
-- If the document is not actually a legal agreement, return: {"error": "not_legal_document", "summary": "This does not appear to be a legal agreement."}
-- Be specific and actionable. Do not use vague language.
-- Aim for completeness but do not fabricate findings that are not supported by the text.`;
+// --- LLM API ---
+
+const SYSTEM_PROMPT = `You analyze legal agreements (ToS, Privacy Policies, EULAs) for consumers. Return ONLY valid JSON (no markdown/fences):
+
+{"summary":"2-3 sentence plain-English summary.","overallRisk":"low|medium|high","findings":[{"severity":"high|medium|low","category":"string","title":"Under 10 words","explanation":"1-2 sentences, plain English.","quote":"Relevant excerpt, under 50 words"}]}
+
+Severity: HIGH = harms user rights (arbitration, class action waivers, broad IP assignment, unilateral term changes, perpetual content licenses, jury waiver). MEDIUM = company advantages (auto-renewal, broad data sharing, terminate without cause, modify services). LOW = standard but notable (governing law, indemnification, warranty disclaimers).
+
+Categories: Arbitration, Class Action, IP Rights, Liability, Data Privacy, Data Sharing, Account Termination, Content License, Price Changes, Auto-Renewal, Governing Law, Indemnification, Warranty, Modification of Terms, Third Party, Other.
+
+Order by severity (high first). Be specific. Don't fabricate. If not a legal agreement: {"error":"not_legal_document","summary":"This does not appear to be a legal agreement."}`;
 
 // --- Provider-specific API calls ---
 
-async function callAnthropic(settings, text) {
+async function callAnthropic(settings, text, abortSignal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
+  if (abortSignal) abortSignal.addEventListener('abort', () => controller.abort());
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -111,7 +149,7 @@ async function callAnthropic(settings, text) {
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model: settings.model || 'claude-haiku-4-5-20251001',
+        model: settings.model || 'claude-sonnet-4-5-20250514',
         max_tokens: 2048,
         system: SYSTEM_PROMPT,
         messages: [
@@ -139,11 +177,12 @@ async function callAnthropic(settings, text) {
   }
 }
 
-async function callOpenAICompatible(settings, text) {
+async function callOpenAICompatible(settings, text, abortSignal) {
   const baseUrl = (settings.baseUrl || 'https://api.openai.com').replace(/\/+$/, '');
   const endpoint = `${baseUrl}/v1/chat/completions`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
+  if (abortSignal) abortSignal.addEventListener('abort', () => controller.abort());
 
   try {
     const response = await fetch(endpoint, {
@@ -154,7 +193,7 @@ async function callOpenAICompatible(settings, text) {
         'Authorization': `Bearer ${settings.apiKey}`,
       },
       body: JSON.stringify({
-        model: settings.model || 'gpt-4o-mini',
+        model: settings.model || 'gpt-4o',
         max_tokens: 2048,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
@@ -204,8 +243,8 @@ function htmlToText(html) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (text.length > 25000) {
-    text = text.substring(0, 25000) + '\n\n[Text truncated at 25,000 characters]';
+  if (text.length > 50000) {
+    text = text.substring(0, 50000) + '\n\n[Text truncated at 50,000 characters]';
   }
   return text;
 }
@@ -253,12 +292,12 @@ function extractLegalLinks(html, baseUrl) {
 
 // --- LLM Analysis (shared by direct page and URL fetch) ---
 
-async function callLLM(settings, text) {
+async function callLLM(settings, text, abortSignal) {
   const provider = settings.provider || 'anthropic';
   if (provider === 'anthropic') {
-    return await callAnthropic(settings, text);
+    return await callAnthropic(settings, text, abortSignal);
   } else {
-    return await callOpenAICompatible(settings, text);
+    return await callOpenAICompatible(settings, text, abortSignal);
   }
 }
 
@@ -286,6 +325,7 @@ async function analyzeTOS(tabId) {
     return;
   }
 
+  const originalUrl = state.url;
   const settings = await chrome.storage.local.get(['provider', 'apiKey', 'baseUrl', 'model']);
 
   if (!settings.apiKey) {
@@ -296,18 +336,23 @@ async function analyzeTOS(tabId) {
     return;
   }
 
+  const abortSignal = getTabAbort(tabId);
+
   await chrome.storage.session.set({
     [stateKey]: { ...state, status: 'analyzing', analyzeStartedAt: Date.now() },
   });
   updateBadge(tabId, 'analyzing');
 
-  // Hard 60s deadline for the entire analysis flow
   const deadline = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Analysis timed out. Please try again.')), 60000)
   );
 
   try {
-    const rawText = await Promise.race([callLLM(settings, state.text), deadline]);
+    const rawText = await Promise.race([callLLM(settings, state.text, abortSignal), deadline]);
+
+    // Don't write results if the user navigated away
+    if (await isStale(stateKey, originalUrl)) return;
+
     const analysis = parseAnalysis(rawText);
 
     if (analysis.error === 'not_legal_document') {
@@ -332,7 +377,9 @@ async function analyzeTOS(tabId) {
       },
     });
     updateBadge(tabId, 'complete', highCount);
+    notifyAnalysisComplete(tabId, analysis);
   } catch (err) {
+    if (err.name === 'AbortError' || await isStale(stateKey, originalUrl)) return;
     await chrome.storage.session.set({
       [stateKey]: { ...state, status: 'error', error: err.message },
     });
@@ -349,6 +396,7 @@ async function analyzeURL(tabId, url, linkIndex) {
 
   if (!state) return;
 
+  const originalUrl = state.url;
   const settings = await chrome.storage.local.get(['provider', 'apiKey', 'baseUrl', 'model']);
 
   if (!settings.apiKey) {
@@ -358,6 +406,8 @@ async function analyzeURL(tabId, url, linkIndex) {
     updateBadge(tabId, 'error');
     return;
   }
+
+  const abortSignal = getTabAbort(tabId);
 
   // Mark this specific link as analyzing
   const linkResults = { ...(state.linkResults || {}) };
@@ -370,6 +420,7 @@ async function analyzeURL(tabId, url, linkIndex) {
     // Fetch the linked page (15s timeout)
     const fetchController = new AbortController();
     const fetchTimeout = setTimeout(() => fetchController.abort(), 15000);
+    if (abortSignal) abortSignal.addEventListener('abort', () => fetchController.abort());
     let html;
     try {
       const response = await fetch(url, { signal: fetchController.signal });
@@ -378,12 +429,17 @@ async function analyzeURL(tabId, url, linkIndex) {
       }
       html = await response.text();
     } catch (err) {
-      if (err.name === 'AbortError') throw new Error('Page took too long to load.');
+      if (err.name === 'AbortError') {
+        if (await isStale(stateKey, originalUrl)) return;
+        throw new Error('Page took too long to load.');
+      }
       throw err;
     } finally {
       clearTimeout(fetchTimeout);
     }
     const text = htmlToText(html);
+
+    if (await isStale(stateKey, originalUrl)) return;
 
     if (text.length < 500) {
       linkResults[linkIndex] = {
@@ -397,7 +453,10 @@ async function analyzeURL(tabId, url, linkIndex) {
     }
 
     // Analyze with LLM
-    const rawText = await callLLM(settings, text);
+    const rawText = await callLLM(settings, text, abortSignal);
+
+    if (await isStale(stateKey, originalUrl)) return;
+
     const analysis = parseAnalysis(rawText);
 
     if (analysis.error === 'not_legal_document') {
@@ -439,6 +498,7 @@ async function analyzeURL(tabId, url, linkIndex) {
     );
     updateBadge(tabId, 'complete', maxHigh);
   } catch (err) {
+    if (err.name === 'AbortError' || await isStale(stateKey, originalUrl)) return;
     linkResults[linkIndex] = {
       status: 'error',
       error: err.message,
@@ -522,7 +582,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 'Authorization': `Bearer ${settings.apiKey}`,
               },
               body: JSON.stringify({
-                model: settings.model || 'gpt-4o-mini',
+                model: settings.model || 'gpt-4o',
                 max_tokens: 10,
                 messages: [{ role: 'user', content: testText }],
               }),
@@ -547,7 +607,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 'anthropic-dangerous-direct-browser-access': 'true',
               },
               body: JSON.stringify({
-                model: settings.model || 'claude-haiku-4-5-20251001',
+                model: settings.model || 'claude-sonnet-4-5-20250514',
                 max_tokens: 10,
                 messages: [{ role: 'user', content: testText }],
               }),
@@ -601,15 +661,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Clean up on tab close
 chrome.tabs.onRemoved.addListener((tabId) => {
+  abortTab(tabId);
   chrome.storage.session.remove(`tab_${tabId}`);
 });
 
-// Clear state on navigation and tell content script to reset
+// Clear state on actual navigation (URL change), not spurious loading events from SPAs
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
+  if (changeInfo.url) {
+    abortTab(tabId);
     chrome.storage.session.remove(`tab_${tabId}`);
     chrome.action.setBadgeText({ text: '', tabId });
-    // Reset content script detection flag (handles bfcache/SPA edge cases)
     chrome.tabs.sendMessage(tabId, { type: 'RESET_DETECTION' }).catch(() => {});
   }
 });

@@ -1,6 +1,6 @@
 const PROVIDER_DEFAULTS = {
   anthropic: {
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-sonnet-4-5-20250514',
     baseUrl: '',
     placeholder: 'sk-ant-...',
     helpText: 'Enter your Claude API key.',
@@ -8,7 +8,7 @@ const PROVIDER_DEFAULTS = {
     helpLinkText: 'Get one here',
   },
   openai: {
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     baseUrl: 'https://api.openai.com',
     placeholder: 'sk-...',
     helpText: 'Enter your API key. Works with OpenAI, Groq, Together, Mistral, Ollama, and any OpenAI-compatible API.',

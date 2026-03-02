@@ -26,6 +26,9 @@
     'end user license agreement', 'eula', 'user agreement',
     'acceptable use policy', 'data processing agreement',
     'subscriber agreement', 'license agreement', 'service agreement',
+    'electronic consent', 'e-sign disclosure', 'esign disclosure',
+    'consent to electronic', 'electronic disclosure',
+    'consent to receive electronic', 'paperless disclosure',
   ];
 
   const LEGAL_KEYWORDS = [
@@ -35,6 +38,9 @@
     'confidential', 'personal data', 'data controller', 'data processor',
     'binding agreement', 'waiver', 'severability', 'force majeure',
     'class action', 'dispute resolution', 'limitation of liability',
+    'withdraw your consent', 'electronic records', 'legal disclosures',
+    'sign documents electronically', 'retain information',
+    'paperless', 'electronically',
   ];
 
   // Consent text patterns — match language near submit buttons / signup forms
@@ -53,7 +59,7 @@
     'acceptable use',
   ];
 
-  const MAX_TEXT_LENGTH = 25000;
+  const MAX_TEXT_LENGTH = 50000;
   const OBSERVER_TIMEOUT = 10000; // 10s (reduced from 30s)
   const DEBOUNCE_MS = 800;
   const URL_POLL_INTERVAL = 2000;
@@ -85,7 +91,7 @@
   // --- Detection ---
 
   function checkUrlPatterns() {
-    const path = window.location.pathname + window.location.search;
+    const path = window.location.pathname + window.location.search + window.location.hash;
     return TOS_URL_PATTERNS.some(p => p.test(path));
   }
 
@@ -118,9 +124,9 @@
       for (const kw of LEGAL_KEYWORDS) {
         if (text.includes(kw)) keywordCount++;
       }
-      if (keywordCount >= 5) return true;
+      if (keywordCount >= 5) return container;
     }
-    return false;
+    return null;
   }
 
   // --- Signup CTA Detection (gates broader legal link scanning) ---
@@ -199,7 +205,18 @@
   // --- Text Extraction ---
   // Reads from live DOM — innerText only called once during final extraction
 
-  function extractText() {
+  function extractText(sourceEl) {
+    // If a specific source element was identified (e.g. inline detection), use it directly
+    if (sourceEl) {
+      let text = sourceEl.innerText.trim();
+      if (text.length >= 500) {
+        if (text.length > MAX_TEXT_LENGTH) {
+          text = text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]';
+        }
+        return text;
+      }
+    }
+
     const contentSelectors = [
       'main', 'article', '[role="main"]',
       'dialog[open]', '[role="dialog"]',
@@ -212,7 +229,7 @@
         const text = el.innerText.trim();
         if (text.length >= 500) {
           return text.length > MAX_TEXT_LENGTH
-            ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 25,000 characters]'
+            ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]'
             : text;
         }
       }
@@ -220,17 +237,17 @@
 
     let text = document.body.innerText.trim();
     if (text.length > MAX_TEXT_LENGTH) {
-      text = text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 25,000 characters]';
+      text = text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]';
     }
     return text;
   }
 
   // --- Send Messages ---
 
-  function sendDetection(detectionMethod) {
+  function sendDetection(detectionMethod, sourceEl) {
     if (hasSentDetection) return;
 
-    const text = extractText();
+    const text = extractText(sourceEl);
     if (text.length < 500) return;
 
     hasSentDetection = true;
@@ -265,11 +282,11 @@
     // Tier 2: Heading match
     const headingMatch = checkHeadings();
     // Tier 3: Inline legal text (only if no URL/heading match)
-    const inlineMatch = !urlMatch && !headingMatch ? checkInlineLegalText() : false;
+    const inlineEl = !urlMatch && !headingMatch ? checkInlineLegalText() : null;
 
-    if (urlMatch || headingMatch || inlineMatch) {
+    if (urlMatch || headingMatch || inlineEl) {
       const method = urlMatch ? 'url' : headingMatch ? 'heading' : 'inline';
-      sendDetection(method);
+      sendDetection(method, inlineEl);
       return;
     }
 
